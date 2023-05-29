@@ -1,31 +1,59 @@
 const bcrypt = require('bcrypt');
-const connection = require('../config/connection')
+const connection = require('../config/connection');
 const mysql = require('mysql');
 const express = require('express')
 const app = express.Router();
 const secretKey = 'secretkey';
+const bodyParser = require('body-parser');
+app.use(bodyParser.json());
 
-// app.get('/api/data', (req, res) => {
-//     // Melakukan query ke database
-//     const query = 'SELECT * FROM user';
-//     connection.query(query, (error, results) => {
-//       if (error) {
-//         console.error('Error executing query:', error);
-//         res.status(500).json({ error: 'Internal Server Error' });
-//       } else {
-//         // Mengirim data sebagai respons
-//         res.json(results);
-//       }
-//     });
-// });
 
-app.get("/getAllUser", (req, res) => {
-    const query = "SELECT * FROM user"
-    connection.query(query, (err, rows, field) => {
+app.get("/getDetailRecipe", (req, res) => {
+    const id = req.body.id
+    const query = "SELECT * FROM recipes where id = ?"
+    connection.query(query, [id],(err, results, field) => {
         if(err) {
             res.status(500).send({message: err.sqlMessage})
         } else {
-            res.json(rows)
+            res.json(results)
+        }
+    })
+    console.log(id)
+})
+
+app.get("/getByTitle", (req, res) => {
+    const title = req.body.title;
+    const query = "SELECT * FROM recipes WHERE title LIKE ?";
+    const searchTitle = `%${title}%`; 
+    connection.query(query, [searchTitle], (err, results, field) => {
+      if (err) {
+        res.status(500).send({ message: err.sqlMessage });
+      } else {
+        res.json(results);
+      }
+    });
+});
+
+app.get("/getRecommendation", (req, res) => {
+    const recommendations = req.body.recommendations;
+    const query = 'SELECT * FROM recipes WHERE title IN (?)';
+    connection.query(query, [recommendations], (err, results, field) => {
+      if (err) {
+        res.status(500).send({ message: err.sqlMessage });
+      } else {
+        res.json(results);
+      }
+    });
+});
+
+app.get("/getByTag", (req, res) => {
+    const tag = req.body.tag
+    const query = "SELECT * FROM recipes where tag = ?" 
+    connection.query(query, [tag],(err, results, field) => {
+        if(err) {
+            res.status(500).send({message: err.sqlMessage})
+        } else {
+            res.json(results)
         }
     })
 })
@@ -33,19 +61,20 @@ app.get("/getAllUser", (req, res) => {
 app.post("/signup", (req, res) => {
     const name = req.body.name
     const username = req.body.username
-    const email = req.body.amount
-    const password = req.body.date
+    const email = req.body.email
+    const password = req.body.password
 
     function hashPassword(password) {
+        const pass = password;
         const saltRounds = 10;
-        const hashedPassword = bcrypt.hashSync(password, saltRounds);
+        const hashedPassword = bcrypt.hashSync(pass, saltRounds);
         return hashedPassword;
     }
 
     const hashedPassword = hashPassword(password);
 
     const check = "SELECT * FROM user WHERE username = ?"
-    connection.query(check, [username], (err, rows, fields) => {
+    connection.query(check, [username], (err, results, fields) => {
         if (err) {
             res.status(500).send({message: err.sqlMessage})
         } if (results.length > 0) {
@@ -56,7 +85,7 @@ app.post("/signup", (req, res) => {
 
     const query = "INSERT INTO user (name, username, email, password) values (?, ?, ?, ?)"
 
-    connection.query(query, [name, username, email, hashedPassword], (err, rows, fields) => {
+    connection.query(query, [name, username, email, hashedPassword], (err, results, fields) => {
         if (err) {
             res.status(500).send({message: err.sqlMessage})
         } else {
@@ -66,9 +95,10 @@ app.post("/signup", (req, res) => {
 })
 
 app.post('/login', (req, res) => {
-    const { username, password } = req.body;
+    const jwt = require('jsonwebtoken');
+    const username = req.body.username;
+    const password = req.body.password;
 
-    // Cari pengguna berdasarkan username di database
     const getUserQuery = 'SELECT * FROM user WHERE username = ?';
     connection.query(getUserQuery, [username], (err, results) => {
         if (err) {
@@ -77,11 +107,9 @@ app.post('/login', (req, res) => {
             return;
         }
 
-    // Jika login berhasil
         if (results.length > 0) {
             const user = results[0];
     
-            // Periksa password menggunakan bcrypt
             bcrypt.compare(password, user.password, (err, isMatch) => {
                 if (err) {
                     console.error('Error memeriksa password:', err);
@@ -90,51 +118,38 @@ app.post('/login', (req, res) => {
                 }
         
                 if (isMatch) {
-                    // Jika login berhasil, buat token JWT
                     const token = jwt.sign({ username: user.username }, secretKey, { expiresIn: '1h' });
         
-                    // Kirim token sebagai respon
                     res.json({ token });
                 } else {
-                    // Jika login gagal
-                    res.status(401).json({ error: 'Username atau password salah' });
+                    res.status(401).json({ error: 'Username atau password salah dalam' });
                 }
             }); 
         } else {
-            // Jika pengguna tidak ditemukan
-            res.status(401).json({ error: 'Username atau password salah' });
+            res.status(401).json({ error: 'Username atau password salah luar' });
         }
     }); 
 }); 
 
-// Middleware untuk memeriksa validitas token setiap kali request dilakukan
 function authenticateToken(req, res, next) {
-    // Mendapatkan token dari header Authorization
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
   
     if (token == null) {
-      // Jika token tidak ada, kirim respon dengan status 401 Unauthorized
       return res.status(401).json({ error: 'Token tidak ditemukan' });
     }
   
-    // Memverifikasi token
     jwt.verify(token, secretKey, (err, user) => {
       if (err) {
-        // Jika token tidak valid, kirim respon dengan status 403 Forbidden
         return res.status(403).json({ error: 'Token tidak valid' });
       }
-      // Menyimpan data pengguna dari token ke dalam objek req.user
     req.user = user;
 
-    // Lanjut ke handler berikutnya
     next();
   });
 }
 
-// Contoh penggunaan middleware authenticateToken pada sebuah protected route
 app.get('/protected', authenticateToken, (req, res) => {
-  // Jika token valid, kirim respon dengan data pengguna
   res.json({ user: req.user });
 });
 
