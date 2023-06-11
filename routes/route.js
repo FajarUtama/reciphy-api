@@ -1,7 +1,8 @@
 const bcrypt = require('bcrypt');
 const connection = require('../config/connection');
 const mysql = require('mysql');
-const express = require('express')
+const express = require('express');
+const axios = require('axios');
 const app = express.Router();
 const secretKey = 'secretkey';
 const bodyParser = require('body-parser');
@@ -9,20 +10,49 @@ app.use(bodyParser.json());
 
 
 app.get("/getDetailRecipe", (req, res) => {
-    const id = req.body.id
+    const id = req.query.id;
     const query = "SELECT * FROM recipes where id = ?"
     connection.query(query, [id],(err, results, field) => {
         if(err) {
             res.status(500).send({message: err.sqlMessage})
         } else {
-            res.json(results)
+            const dataObject = results[0];
+            res.json(dataObject);
         }
     })
-    console.log(id)
 })
 
-app.get("/getByTitle", (req, res) => {
-    const title = req.body.title;
+app.get("/getSimilar", (req, res) => {
+    const title = req.query.title;
+
+    axios.get('https://reciphy-getsim.up.railway.app/similar/'+title)
+        .then(response => {
+            const data = response.data;
+            const query = 'SELECT * FROM recipes WHERE title IN (?)';
+            connection.query(query, [data], (err, similar, field) => {
+                if (err) {
+                res.status(500).send({ message: err.sqlMessage });
+                } else {
+                const data = similar.map(item => {
+                    return {
+                        title: item.title,
+                        id: item.id,
+                        loves: item.loves,
+                        url: item.url
+                    };
+                    });
+                res.json(data);
+                }
+            });
+        })
+        .catch(error => {
+            console.error(error);
+            res.status(500).send({ message:"data not found"});
+        });
+})
+
+app.get("/searchByTitle", (req, res) => {
+    const title = req.query.title;
     const query = "SELECT * FROM recipes WHERE title LIKE ?";
     const searchTitle = `%${title}%`; 
     connection.query(query, [searchTitle], (err, results, field) => {
@@ -31,23 +61,36 @@ app.get("/getByTitle", (req, res) => {
       } else {
         res.json(results);
       }
-    });
+    }); 
 });
 
 app.get("/getRecommendation", (req, res) => {
-    const recommendations = req.body.recommendations;
-    const query = 'SELECT * FROM recipes WHERE title IN (?)';
-    connection.query(query, [recommendations], (err, results, field) => {
-      if (err) {
-        res.status(500).send({ message: err.sqlMessage });
-      } else {
-        res.json(results);
-      }
-    });
+    const input = req.query.input
+
+    axios.get('https://reciphy-production.up.railway.app/predik/'+input)
+        .then(response => {
+            const data = response.data;
+            const recommendationsList = data.recommendations;
+
+            console.log(recommendationsList);
+
+            const query = 'SELECT * FROM recipes WHERE title IN (?)';
+            connection.query(query, [recommendationsList], (err, results, field) => {
+              if (err) {
+                res.status(500).send({ message: err.sqlMessage });
+              } else {
+                res.json(results);
+              }
+            });
+        })
+        .catch(error => {
+            console.error(error);
+            res.status(500).send({ message:"data not found"});
+        });
 });
 
 app.get("/getByTag", (req, res) => {
-    const tag = req.body.tag
+    const tag = req.query.tag;
     const query = "SELECT * FROM recipes where tag = ?" 
     connection.query(query, [tag],(err, results, field) => {
         if(err) {
@@ -59,10 +102,10 @@ app.get("/getByTag", (req, res) => {
 })
 
 app.post("/signup", (req, res) => {
-    const name = req.body.name
-    const username = req.body.username
-    const email = req.body.email
-    const password = req.body.password
+    const name = req.query.name
+    const username = req.query.username
+    const email = req.query.email
+    const password = req.query.password
 
     function hashPassword(password) {
         const pass = password;
@@ -96,8 +139,8 @@ app.post("/signup", (req, res) => {
 
 app.post('/login', (req, res) => {
     const jwt = require('jsonwebtoken');
-    const username = req.body.username;
-    const password = req.body.password;
+    const username = req.query.username;
+    const password = req.query.password;
 
     const getUserQuery = 'SELECT * FROM user WHERE username = ?';
     connection.query(getUserQuery, [username], (err, results) => {
@@ -122,11 +165,11 @@ app.post('/login', (req, res) => {
         
                     res.json({ token });
                 } else {
-                    res.status(401).json({ error: 'Username atau password salah dalam' });
+                    res.status(401).json({ error: 'Username atau password salah' });
                 }
             }); 
         } else {
-            res.status(401).json({ error: 'Username atau password salah luar' });
+            res.status(401).json({ error: 'Username atau password salah' });
         }
     }); 
 }); 
